@@ -18,7 +18,7 @@ if __name__ == "__main__":
     rospy.init_node("status_system_node")
 
     param_report_gpu = rospy.get_param("~report_gpu", False)
-    pub_psutil = rospy.Publisher("system", String, queue_size = 1)
+    pub_psutil = rospy.Publisher("stats", String, queue_size = 1)
 
     p = psutil.Process()
 
