@@ -10,6 +10,7 @@ import time
 import subprocess
 
 from std_msgs.msg import String
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 
 def mean(list):
     return sum(list)/len(list)
@@ -17,34 +18,51 @@ def mean(list):
 if __name__ == "__main__":
     rospy.init_node("status_system_node")
 
+    if int(psutil.__version__.split(".")[0]) < 5:
+        rospy.logerr("Please install psutil>=5.0.0")
+        exit(0)
+
     param_report_gpu = rospy.get_param("~report_gpu", False)
-    pub_psutil = rospy.Publisher("stats", String, queue_size = 1)
+    param_interval = rospy.get_param("~interval", 5.0)
+    pub_psutil = rospy.Publisher("diagnostics", DiagnosticArray, queue_size = 1)
 
     p = psutil.Process()
 
-    rate = rospy.Rate(0.2)
+    rate = rospy.Rate(1.0/param_interval)
+
     while not rospy.is_shutdown():
         rate.sleep()
 
         status = {"cpu":{}, "net":{}, "mem":{}, "disk": {}}
+
+        status_cpu = DiagnosticStatus()
+        status_cpu.name = "CPU"
+        status_net = DiagnosticStatus()
+        status_net.name = "Network"
+        status_mem = DiagnosticStatus()
+        status_mem.name = "Memory"
+        status_disk = DiagnosticStatus()
+        status_disk.name = "Disk"
+
         if param_report_gpu:
-             status["gpu"] = {}
+            status_gpu = DiagnosticStatus()
+            status_gpu.name = "GPU"
 
         with p.oneshot():
             sensors_temperatures = psutil.sensors_temperatures()
             if 'coretemp' in sensors_temperatures:
-                status['cpu']['temp'] = mean(list(map(lambda x:x.current, sensors_temperatures['coretemp'])))
-            status['cpu']['percent'] = mean(psutil.cpu_percent(percpu=True))
-            status['disk']['percent'] = psutil.disk_usage('/').percent
-            status['net']['bytes_sent'] = psutil.net_io_counters().bytes_sent
-            status['net']['bytes_recv'] = psutil.net_io_counters().bytes_recv
+                status_cpu.values.append(KeyValue("coretemp", str(list(map(lambda x:x.current, sensors_temperatures['coretemp'])))))
+            status_cpu.values.append(KeyValue("percent", str(mean(psutil.cpu_percent(percpu=True)))))
+            status_disk.values.append(KeyValue("percent", str(psutil.disk_usage('/').percent)))
+            status_net.values.append(KeyValue("bytes_sent", str(psutil.net_io_counters().bytes_sent)))
+            status_net.values.append(KeyValue("bytes_recv", str(psutil.net_io_counters().bytes_recv)))
             net_if_addrs = psutil.net_if_addrs()
             for k in net_if_addrs:
                 net_if_addrs[k] = list(filter(lambda x: x.family == socket.AF_INET, net_if_addrs[k]))
                 net_if_addrs[k] = list(map(lambda x: x.address, net_if_addrs[k]))
-            status['net']['if_addrs'] = net_if_addrs
-            status['mem']['virtual_percent'] = psutil.virtual_memory().percent
-            status['mem']['swap_percent'] = psutil.swap_memory().percent
+            status_net.values.append(KeyValue("if_addrs", str(net_if_addrs)))
+            status_mem.values.append(KeyValue("virtual_percent", str(psutil.virtual_memory().percent)))
+            status_mem.values.append(KeyValue("swap_percent", str(psutil.swap_memory().percent)))
 
         if param_report_gpu:
             nvinfo =  subprocess.Popen(['nvidia-smi', '-q', '-x'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
@@ -52,15 +70,20 @@ if __name__ == "__main__":
             try:
                 for line in nvinfo[0].decode().split('\n'):
                     if '<gpu_temp>' in line and ' C' in line:
-                        status['gpu']['temp'] = float(re.search('<gpu_temp>(.*) C</gpu_temp>', line).group(1))
+                        status_gpu.values.append(KeyValue("temp", str(float(re.search('<gpu_temp>(.*) C</gpu_temp>', line).group(1)))))
                     if '<power_draw>' in line and ' W' in line:
-                        status['gpu']['power_draw'] = float(re.search('<power_draw>(.*) W</power_draw>', line).group(1))
+                        status_gpu.values.append(KeyValue("power_draw", str(float(re.search('<power_draw>(.*) W</power_draw>', line).group(1)))))
                     if '<power_state>' in line:
-                        status['gpu']['power_state'] = re.search('<power_state>(.*)</power_state>', line).group(1)
+                        status_gpu.values.append(KeyValue("power_state", str(re.search('<power_state>(.*)</power_state>', line).group(1))))
             except (AttributeError, ValueError) as e:
                 rospy.logwarn("error updating gpu statistics")
-                status['gpu']['temp'] = -1
-                status['gpu']['power_draw'] = -1
-                status['gpu']['power_state'] = -1
+                status_gpu.values.append(KeyValue("temp", ""))
+                status_gpu.values.append(KeyValue("power_draw", ""))
+                status_gpu.values.append(KeyValue("power_state", ""))
 
-        pub_psutil.publish(json.dumps(status))
+        msg = DiagnosticArray()
+        msg.status = [status_cpu, status_net, status_mem, status_disk]
+        if param_report_gpu:
+            msg.status.append(status_gpu)
+
+        pub_psutil.publish(msg)
