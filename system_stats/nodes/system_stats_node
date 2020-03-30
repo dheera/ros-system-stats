@@ -23,7 +23,7 @@ if __name__ == "__main__":
         rospy.logerr("Please install psutil>=5.0.0")
         exit(0)
 
-    param_report_gpu = rospy.get_param("~report_gpu", False)
+    param_report_gpu = rospy.get_param("~report_gpu", False) # nvidia only for now; requires nvidia-smi
     param_interval = rospy.get_param("~interval", 5.0)
     pub_psutil = rospy.Publisher("diagnostics", DiagnosticArray, queue_size = 1)
 
@@ -34,9 +34,11 @@ if __name__ == "__main__":
     pub_net_bytes_sent= rospy.Publisher("system/net/bytes_sent", Int64, queue_size = 1)
     pub_mem_usage_virtual= rospy.Publisher("system/mem/usage_virtual", Float32, queue_size = 1)
     pub_mem_usage_swap= rospy.Publisher("system/mem/usage_swap", Float32, queue_size = 1)
-    pub_gpu_temp = rospy.Publisher("system/gpu/temp", Temperature, queue_size = 1)
-    pub_gpu_power_draw = rospy.Publisher("system/gpu/power_draw", Float32, queue_size = 1)
-    pub_gpu_power_state = rospy.Publisher("system/gpu/power_state", String, queue_size = 1)
+
+    if param_report_gpu:
+        pub_gpu_temp = rospy.Publisher("system/gpu/temp", Temperature, queue_size = 1)
+        pub_gpu_power_draw = rospy.Publisher("system/gpu/power_draw", Float32, queue_size = 1)
+        pub_gpu_power_state = rospy.Publisher("system/gpu/power_state", String, queue_size = 1)
 
     p = psutil.Process()
 
